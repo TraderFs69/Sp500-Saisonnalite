@@ -31,5 +31,5 @@ Le déploiement peut être effectué sur [Streamlit Cloud](https://streamlit.io/
 
 ## Auteur
 
-Développé avec ❤️ par [TonNom].
+Développé avec ❤️ par Francois Sanscartier.
 
