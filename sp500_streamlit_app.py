@@ -84,14 +84,12 @@ if st.button("Lancer l'analyse"):
 
         # Export Excel en mémoire
         output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            stats_df.to_excel(writer, sheet_name="Statistiques", index=False)
-            for ticker, series in rendements_par_ticker.items():
-                df = series.reset_index()
-                if df.shape[1] == 2:
-                    df.columns = ['Année', 'Rendement (%)']
-                    df.to_excel(writer, sheet_name=ticker[:31], index=False)
-                else:
+       with pd.ExcelWriter("rendements_saison_sp500.xlsx") as writer:
+    stats_df.to_excel(writer, sheet_name="Statistiques", index=False)
+    for ticker, series in rendements_par_ticker.items():
+        df = pd.DataFrame({'Année': series.index, 'Rendement (%)': series.values})
+        df.to_excel(writer, sheet_name=ticker[:31], index=False)
+    else:
                     st.warning(f"⚠️ Erreur pour {ticker} : données incomplètes")
 
         st.download_button("📥 Télécharger le fichier Excel", data=output.getvalue(),
