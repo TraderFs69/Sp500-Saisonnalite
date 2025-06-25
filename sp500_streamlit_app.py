@@ -55,7 +55,7 @@ if st.button("Lancer l'analyse"):
                 except:
                     continue
 
-            if len(rendements) >= 3:
+            if len(rendements) >= 1:
                 df_rend = pd.Series(rendements).sort_index()
                 moyenne = df_rend.mean()
                 mediane = df_rend.median()
@@ -84,18 +84,16 @@ if st.button("Lancer l'analyse"):
         st.dataframe(stats_df)
 
         output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            stats_df.to_excel(writer, sheet_name="Statistiques", index=False)
-            for ticker, series in rendements_par_ticker.items():
-                try:
-                    df = series.reset_index()
-                    if df.shape[1] != 2:
-                        continue
-                    df.columns = ['Année', 'Rendement (%)']
-                    df.to_excel(writer, sheet_name=ticker[:31], index=False)
-                except Exception as e:
-                    st.warning(f"⚠️ Erreur lors de l’écriture du détail pour {ticker} : {e}")
-                    continue
+       with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    stats_df.to_excel(writer, sheet_name="Statistiques", index=False)
+    for ticker, series in rendements_par_ticker.items():
+        try:
+            df = pd.DataFrame({'Année': series.index, 'Rendement (%)': series.values})
+            df.to_excel(writer, sheet_name=ticker[:31], index=False)
+        except Exception as e:
+            st.warning(f"⚠️ Erreur lors de l’écriture du détail pour {ticker} : {e}")
+            continue
+
         st.download_button(label="📥 Télécharger le fichier Excel", data=output.getvalue(), file_name="rendements_saison_sp500.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     else:
         st.warning("⚠️ Aucune donnée suffisante pour créer un fichier.")
