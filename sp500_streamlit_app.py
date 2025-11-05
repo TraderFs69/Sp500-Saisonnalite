@@ -6,12 +6,14 @@ from io import BytesIO
 import requests
 import warnings
 import builtins
-import traceback  # ✅ ajouté ici
+import traceback
 warnings.filterwarnings("ignore")
 
-# Vérifie si str a été écrasé
-if (str is not builtins.str) or (not callable(str)):
-    st.error("⚠️ Le nom `str` a été réassigné dans votre code. Renommez cette variable (ex.: `texte`).")
+# -- Réparation agressive: s'assure que builtins.str est bien la classe string
+try:
+    builtins.str = ("").__class__
+except Exception:
+    pass
 
 st.title("📈 Analyse de saisonnalité du S&P 500")
 
@@ -49,9 +51,10 @@ def fetch_sp500_tickers() -> list[str]:
         else:
             raise
 
-    # ne pas utiliser astype(str) si str a été écrasé
+    # Important: éviter astype(str) -> utiliser le dtype "string"
     symbols = df["Symbol"].astype("string").str.strip().tolist()
-    symbols = [s.replace(".", "-") for s in symbols]  # BRK.B → BRK-B
+    # Adaptation pour yfinance
+    symbols = [s.replace(".", "-") for s in symbols]
     return sorted(set(symbols))
 
 def parse_mmdd(year: int, mmdd: str) -> pd.Timestamp:
@@ -70,10 +73,16 @@ def download_prices(ticker: str, start_year: int, end_year: int) -> pd.DataFrame
     )
     if data is None or data.empty:
         return pd.DataFrame()
+
+    # --- Contournement: pas de .rename() du tout ---
     if "Adj Close" in data.columns:
-        close = data["Adj Close"].rename("Close").to_frame()
+        close_series = data["Adj Close"]
     else:
-        close = data["Close"].rename("Close").to_frame()
+        close_series = data["Close"]
+
+    # Build DataFrame explicitement (évite toute logique .rename interne)
+    close = pd.DataFrame({"Close": close_series.values}, index=close_series.index)
+
     # enlever tout timezone
     try:
         close.index = close.index.tz_convert(None)
@@ -82,6 +91,7 @@ def download_prices(ticker: str, start_year: int, end_year: int) -> pd.DataFrame
             close.index = close.index.tz_localize(None)
         except Exception:
             pass
+
     close["Date"] = close.index
     return close
 
