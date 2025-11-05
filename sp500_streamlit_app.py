@@ -5,7 +5,12 @@ from datetime import datetime
 from io import BytesIO
 import requests
 import warnings
+import builtins
 warnings.filterwarnings("ignore")
+
+# Vérifie si str a été écrasé
+if (str is not builtins.str) or (not callable(str)):
+    st.error("⚠️ Le nom `str` a été réassigné dans votre code. Renommez cette variable (ex.: `texte`).")
 
 st.title("📈 Analyse de saisonnalité du S&P 500")
 
@@ -15,12 +20,10 @@ start_mmdd = st.text_input("Date de début annuelle (MM-DD)", value="06-14")
 end_mmdd = st.text_input("Date de fin annuelle (MM-DD)", value="10-30")
 
 WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-FALLBACK_CSV_PATH = None  # ex. "data/sp500_constituents.csv" si tu en as un
+FALLBACK_CSV_PATH = None  # ex. "data/sp500_constituents.csv"
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_sp500_tickers() -> list[str]:
-    """Récupère la table S&P 500 depuis Wikipedia avec User-Agent, sinon fallback CSV.
-       Convertit les symboles au format yfinance (BRK.B -> BRK-B)."""
     headers = {
         "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -39,27 +42,20 @@ def fetch_sp500_tickers() -> list[str]:
         else:
             raise
 
-    symbols = df["Symbol"].astype(str).str.strip().tolist()
+    # ✅ Correction ici — pas astype(str)
+    symbols = df["Symbol"].astype("string").str.strip().tolist()
 
-    # Adaptation pour yfinance : BRK.B -> BRK-B, BF.B -> BF-B, etc.
+    # ✅ Convertit pour yfinance (BRK.B → BRK-B)
     symbols = [s.replace(".", "-") for s in symbols]
 
-    # Quelques exceptions connues si nécessaire (peu utilisé aujourd’hui)
-    # mapping = {"BRK-B":"BRK-B", "BF-B":"BF-B"}
-    # symbols = [mapping.get(s, s) for s in symbols]
-
-    # Dédup et tri
-    uniq = sorted(set(symbols))
-    return uniq
+    return sorted(set(symbols))
 
 def parse_mmdd(year: int, mmdd: str) -> pd.Timestamp:
-    """Transforme 'MM-DD' en Timestamp(year, month, day)."""
     mm, dd = mmdd.split("-")
     return pd.Timestamp(year=int(year), month=int(mm), day=int(dd))
 
 @st.cache_data(show_spinner=False)
 def download_prices(ticker: str, start_year: int, end_year: int) -> pd.DataFrame:
-    """Télécharge l'historique pour un ticker sur l'intervalle [start_year-01-01, end_year-12-31]."""
     data = yf.download(
         ticker,
         start=f"{start_year}-01-01",
@@ -70,7 +66,6 @@ def download_prices(ticker: str, start_year: int, end_year: int) -> pd.DataFrame
     )
     if data is None or data.empty:
         return pd.DataFrame()
-    # On préfère Adj Close si dispo
     if "Adj Close" in data.columns:
         close = data["Adj Close"].rename("Close").to_frame()
     else:
@@ -98,6 +93,7 @@ if st.button("Lancer l'analyse"):
     for i, ticker in enumerate(tickers):
         try:
             data = download_prices(ticker, start_year, end_year)
+
             if data.empty or "Close" not in data.columns:
                 progress_bar.progress((i + 1) / len(tickers))
                 status_text.text(f"{ticker}: pas de données. ({i + 1}/{len(tickers)})")
@@ -115,25 +111,20 @@ if st.button("Lancer l'analyse"):
                     prix_fin = df_period.iloc[-1]["Close"]
                     rendement = ((prix_fin / prix_debut) - 1) * 100.0
                     rendements[year] = rendement
-                except Exception:
+                except:
                     continue
 
             if len(rendements) >= 1:
                 s = pd.Series(rendements, name="Rendement (%)").sort_index()
-                moyenne = s.mean()
-                mediane = s.median()
-                ecart_type = s.std()
-                pourcentage_positif = (s > 0).sum() * 100.0 / len(s)
-
-                rendements_par_ticker[ticker] = s
                 stats_summary.append({
                     "Ticker": ticker,
-                    "Moyenne (%)": round(moyenne, 2),
-                    "Médiane (%)": round(mediane, 2),
-                    "Écart-type (%)": round(ecart_type, 2),
-                    "% Années Positives": round(pourcentage_positif, 2),
-                    "Nb Années": int(len(s)),
+                    "Moyenne (%)": round(s.mean(), 2),
+                    "Médiane (%)": round(s.median(), 2),
+                    "Écart-type (%)": round(s.std(), 2),
+                    "% Années Positives": round((s > 0).sum() * 100.0 / len(s), 2),
+                    "Nb Années": len(s),
                 })
+                rendements_par_ticker[ticker] = s
 
         except Exception as e:
             st.warning(f"⚠️ Erreur pour {ticker} : {e}")
@@ -146,18 +137,14 @@ if st.button("Lancer l'analyse"):
         st.dataframe(stats_df, use_container_width=True)
 
         output = BytesIO()
-        # Assure-toi d'avoir openpyxl dans requirements.txt
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             stats_df.to_excel(writer, sheet_name="Statistiques", index=False)
-            # Détails par ticker (limiter le nombre de feuilles si besoin)
             for ticker, series in rendements_par_ticker.items():
                 try:
                     df = pd.DataFrame({"Année": series.index, "Rendement (%)": series.values})
-                    # Excel limite les noms de feuille à 31 caractères
-                    sheet_name = ticker[:31]
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-                except Exception as e:
-                    st.warning(f"⚠️ Erreur lors de l’écriture du détail pour {ticker} : {e}")
+                    df.to_excel(writer, sheet_name=ticker[:31], index=False)
+                except:
+                    pass
 
         st.download_button(
             label="📥 Télécharger le fichier Excel",
@@ -167,5 +154,3 @@ if st.button("Lancer l'analyse"):
         )
     else:
         st.warning("⚠️ Aucune donnée suffisante pour créer un fichier.")
-
-
