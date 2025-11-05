@@ -105,4 +105,4 @@ def download_prices(ticker: str, start_year: int, end_year: int) -> pd.DataFrame
     return close
 
 if st.button("Lancer l'analyse"):
-    impor
+    import
