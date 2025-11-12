@@ -28,28 +28,88 @@ FALLBACK_CSV_PATH = None  # ex. "data/sp500_constituents.csv"
 # ---------------- Helpers ----------------
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_sp500_tickers() -> list:
-    """Charge la liste S&P500 depuis Wikipedia (avec User-Agent) et convertit pour yfinance (BRK.B -> BRK-B)."""
-    headers = {
-        "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    }
-    try:
-        r = requests.get(WIKI_URL, headers=headers, timeout=20)
-        r.raise_for_status()
-        tables = pd.read_html(r.text)
-        df = tables[0]
-    except Exception as e:
-        if FALLBACK_CSV_PATH:
-            st.warning(f"Wikipedia indisponible ({e}). Utilisation du fallback CSV.")
-            df = pd.read_csv(FALLBACK_CSV_PATH)
-            if "Symbol" not in df.columns:
-                raise ValueError("Le CSV de fallback doit contenir une colonne 'Symbol'.")
-        else:
-            raise
+    """
+    Charge la liste S&P 500 :
+    1) Wikipedia (?action=render) avec User-Agent
+    2) Wikipedia standard
+    3) Fallback Slickcharts
+    Renvoie des tickers formatés pour yfinance (BRK.B -> BRK-B).
+    """
+    import re
 
-    symbols = df["Symbol"].astype("string").str.strip().tolist()
-    symbols = [s.replace(".", "-") for s in symbols]  # BRK.B -> BRK-B
-    return sorted(set(symbols))
+    wiki_urls = [
+        "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies?action=render",
+        "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+    ]
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0.0.0 Safari/537.36"),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml",
+        "Referer": "https://en.wikipedia.org/",
+    }
+
+    def extract_symbols_from_tables(tables: list[pd.DataFrame]) -> list[str] | None:
+        # Choisir la première table qui possède une colonne contenant "Symbol"
+        for df in tables:
+            cols = [str(c).strip() for c in df.columns]
+            if any(re.search(r"\bSymbol\b", c, flags=re.I) for c in cols):
+                sym_col = [c for c in df.columns if re.search(r"\bSymbol\b", str(c), re.I)][0]
+                symbols = (
+                    df[sym_col]
+                    .astype("string")
+                    .str.strip()
+                    .dropna()
+                    .tolist()
+                )
+                return symbols
+        return None
+
+    # 1 & 2) Tentatives Wikipedia
+    for url in wiki_urls:
+        try:
+            r = requests.get(url, headers=headers, timeout=25)
+            r.raise_for_status()
+            tables = pd.read_html(r.text, flavor="lxml")
+            symbols = extract_symbols_from_tables(tables)
+            if symbols:
+                symbols = [s.replace(".", "-") for s in symbols]  # BRK.B -> BRK-B
+                return sorted(set([s for s in symbols if s and s != "nan"]))
+        except Exception:
+            continue  # on tente l'URL suivante
+
+    # 3) Fallback Slickcharts
+    try:
+        sc_headers = headers | {"Referer": "https://www.slickcharts.com/sp500"}
+        sc = requests.get("https://www.slickcharts.com/sp500", headers=sc_headers, timeout=20)
+        sc.raise_for_status()
+        tables = pd.read_html(sc.text)
+        symbols = None
+        for df in tables:
+            if "Symbol" in df.columns:
+                symbols = (
+                    df["Symbol"].astype("string").str.strip().dropna().tolist()
+                )
+                break
+        if symbols:
+            symbols = [s.replace(".", "-") for s in symbols]
+            return sorted(set(symbols))
+    except Exception:
+        pass
+
+    # 4) CSV local facultatif si tu en as un
+    if FALLBACK_CSV_PATH:
+        st.warning("Sources en ligne indisponibles. Utilisation du CSV local.")
+        df = pd.read_csv(FALLBACK_CSV_PATH)
+        if "Symbol" not in df.columns:
+            raise ValueError("Le CSV de fallback doit contenir une colonne 'Symbol'.")
+        symbols = df["Symbol"].astype("string").str.strip().tolist()
+        symbols = [s.replace(".", "-") for s in symbols]
+        return sorted(set(symbols))
+
+    # Si tout échoue :
+    raise RuntimeError("Impossible de récupérer la liste S&P 500 depuis Wikipedia/Slickcharts.")
 
 def parse_mmdd(year: int, mmdd: str) -> pd.Timestamp:
     mm, dd = mmdd.split("-")
